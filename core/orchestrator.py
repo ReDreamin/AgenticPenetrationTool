@@ -5,7 +5,8 @@ import asyncio
 import json
 import time
 from typing import Dict, Any, List, Optional, Callable
-from anthropic import Anthropic
+import httpx
+from anthropic import Anthropic, APIConnectionError, AuthenticationError, APIStatusError
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -24,19 +25,47 @@ class Orchestrator:
         self,
         api_key: Optional[str] = None,
         model: Optional[str] = None,
-        verbose: bool = True
+        verbose: bool = True,
+        proxy: Optional[str] = None
     ):
         self.api_key = api_key or config.ANTHROPIC_API_KEY
         self.model = model or config.CLAUDE_MODEL
         self.verbose = verbose
+        self.console = Console()
 
         if not self.api_key:
             raise ValueError("ANTHROPIC_API_KEY not set. Please set the environment variable or pass api_key parameter.")
 
-        self.client = Anthropic(api_key=self.api_key)
+        # 配置代理
+        proxy_url = proxy or config.HTTPS_PROXY or config.HTTP_PROXY
+
+        # 创建带代理的 HTTP 客户端
+        if proxy_url:
+            self._print(f"[dim]使用代理: {proxy_url}[/dim]")
+            http_client = httpx.Client(
+                proxy=proxy_url,
+                timeout=httpx.Timeout(config.REQUEST_TIMEOUT, connect=10.0)
+            )
+        else:
+            http_client = httpx.Client(
+                timeout=httpx.Timeout(config.REQUEST_TIMEOUT, connect=10.0)
+            )
+
+        # 创建 Anthropic 客户端
+        client_kwargs = {
+            "api_key": self.api_key,
+            "http_client": http_client,
+            "max_retries": config.MAX_RETRIES
+        }
+
+        # 如果设置了自定义 base_url
+        if config.ANTHROPIC_BASE_URL:
+            client_kwargs["base_url"] = config.ANTHROPIC_BASE_URL
+            self._print(f"[dim]使用自定义 API 端点: {config.ANTHROPIC_BASE_URL}[/dim]")
+
+        self.client = Anthropic(**client_kwargs)
         self.tool_server = MCPToolServer()
         self.task_manager = TaskManager()
-        self.console = Console()
 
         # 回调函数
         self.on_tool_call: Optional[Callable] = None
@@ -229,6 +258,22 @@ class Orchestrator:
                 messages=messages
             )
             return response
+        except AuthenticationError as e:
+            self._print(f"[red]API Key 认证失败: {str(e)}[/red]")
+            self._print("[yellow]请检查 ANTHROPIC_API_KEY 是否正确设置[/yellow]")
+            return None
+        except APIConnectionError as e:
+            self._print(f"[red]API 连接失败: {str(e)}[/red]")
+            self._print("[yellow]请检查网络连接或代理设置[/yellow]")
+            self._print("[dim]提示: 设置 HTTP_PROXY 或 HTTPS_PROXY 环境变量，或使用 --proxy 参数[/dim]")
+            return None
+        except APIStatusError as e:
+            self._print(f"[red]API 状态错误 ({e.status_code}): {str(e)}[/red]")
+            return None
+        except httpx.TimeoutException as e:
+            self._print(f"[red]请求超时: {str(e)}[/red]")
+            self._print("[yellow]请检查网络连接或增加超时时间[/yellow]")
+            return None
         except Exception as e:
             self._print(f"[red]API 调用错误: {str(e)}[/red]")
             return None

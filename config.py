@@ -8,8 +8,17 @@ from typing import Optional
 ANTHROPIC_API_KEY: Optional[str] = os.getenv("ANTHROPIC_API_KEY")
 CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
 
+# 代理配置 (用于访问 Anthropic API)
+# 支持 HTTP/HTTPS/SOCKS5 代理
+# 示例: "http://127.0.0.1:7890" 或 "socks5://127.0.0.1:1080"
+HTTP_PROXY: Optional[str] = os.getenv("HTTP_PROXY") or os.getenv("http_proxy")
+HTTPS_PROXY: Optional[str] = os.getenv("HTTPS_PROXY") or os.getenv("https_proxy")
+
+# API 基础 URL (可选，用于自定义 API 端点)
+ANTHROPIC_BASE_URL: Optional[str] = os.getenv("ANTHROPIC_BASE_URL")
+
 # 请求配置
-REQUEST_TIMEOUT: int = 30
+REQUEST_TIMEOUT: int = 60  # 增加超时时间
 MAX_RETRIES: int = 3
 
 # 扫描配置

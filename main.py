@@ -248,9 +248,9 @@ async def main_loop(orchestrator: Orchestrator):
             console.print(f"[red]错误: {str(e)}[/red]")
 
 
-async def run_single_task(target: str, task_type: str, output: str = None, api_key: str = None):
+async def run_single_task(target: str, task_type: str, output: str = None, api_key: str = None, proxy: str = None):
     """运行单个任务（非交互模式）"""
-    orchestrator = Orchestrator(api_key=api_key)
+    orchestrator = Orchestrator(api_key=api_key, proxy=proxy)
 
     console.print(BANNER, style="bold cyan")
 
@@ -309,6 +309,16 @@ def main():
         help='静默模式，减少输出'
     )
 
+    parser.add_argument(
+        '--proxy',
+        help='HTTP 代理地址 (如 http://127.0.0.1:7890)'
+    )
+
+    parser.add_argument(
+        '--base-url',
+        help='自定义 API 端点 (用于 API 转发服务)'
+    )
+
     args = parser.parse_args()
 
     # 确定任务类型
@@ -319,6 +329,11 @@ def main():
     else:
         task_type = "full"
 
+    # 如果指定了 base_url，设置到 config
+    if args.base_url:
+        import config as cfg
+        cfg.ANTHROPIC_BASE_URL = args.base_url
+
     try:
         if args.target:
             # 非交互模式：直接执行任务
@@ -326,11 +341,12 @@ def main():
                 args.target,
                 task_type,
                 args.output,
-                args.api_key
+                args.api_key,
+                args.proxy
             ))
         else:
             # 交互模式
-            orchestrator = Orchestrator(api_key=args.api_key, verbose=not args.quiet)
+            orchestrator = Orchestrator(api_key=args.api_key, verbose=not args.quiet, proxy=args.proxy)
             asyncio.run(main_loop(orchestrator))
 
     except KeyboardInterrupt:
