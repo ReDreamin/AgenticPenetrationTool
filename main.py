@@ -46,9 +46,14 @@ HELP_TEXT = """
   report            - 生成当前任务报告
   status            - 查看当前任务状态
   tools             - 列出所有可用工具
+  mode              - 切换详细/简洁模式
   clear             - 清空对话历史
   help              - 显示帮助信息
   exit/quit         - 退出程序
+
+输出模式:
+  简洁模式(默认)    - 仅显示工具调用摘要
+  详细模式          - 显示完整的工具返回结果
 
 示例:
   scan 192.168.1.100
@@ -235,6 +240,10 @@ async def main_loop(orchestrator: Orchestrator):
             elif command == 'clear':
                 orchestrator.clear_chat_history()
                 console.print("[green]对话历史已清空[/green]")
+
+            elif command == 'mode':
+                # 切换输出模式
+                orchestrator.set_detailed_mode(not orchestrator.detailed_mode)
 
             else:
                 # 尝试作为自然语言指令处理

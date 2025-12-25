@@ -70,11 +70,21 @@ class Orchestrator:
         # 对话历史 (用于 chat 模式的上下文记忆)
         self.chat_history: List[Dict[str, Any]] = []
 
+        # 输出模式: True=详细模式, False=简洁模式
+        self.detailed_mode: bool = False
+        self.detail_max_chars: int = 1000  # 详细模式下结果最大显示字符数
+
         # 回调函数
         self.on_tool_call: Optional[Callable] = None
         self.on_tool_result: Optional[Callable] = None
         self.on_thinking: Optional[Callable] = None
         self.on_message: Optional[Callable] = None
+
+    def set_detailed_mode(self, enabled: bool):
+        """设置输出模式"""
+        self.detailed_mode = enabled
+        mode_name = "详细模式" if enabled else "简洁模式"
+        self._print(f"[cyan]已切换到 {mode_name}[/cyan]")
 
     def _print(self, message: str, style: str = ""):
         """打印消息"""
@@ -89,41 +99,65 @@ class Orchestrator:
     def _print_tool_call(self, tool_name: str, args: Dict[str, Any]):
         """打印工具调用"""
         if self.verbose:
-            args_str = json.dumps(args, ensure_ascii=False, indent=2)
-            self.console.print(f"\n[bold cyan]🔧 调用工具:[/bold cyan] {tool_name}")
-            self.console.print(f"[dim]{args_str}[/dim]")
+            if self.detailed_mode:
+                # 详细模式：显示完整参数
+                args_str = json.dumps(args, ensure_ascii=False, indent=2)
+                self.console.print(f"\n[bold cyan]🔧 调用工具:[/bold cyan] {tool_name}")
+                self.console.print(f"[dim]{args_str}[/dim]")
+            else:
+                # 简洁模式：只显示工具名和关键参数
+                key_params = []
+                for k, v in args.items():
+                    if k in ['url', 'target', 'domain', 'param']:
+                        key_params.append(f"{k}={v}")
+                params_str = ", ".join(key_params) if key_params else ""
+                self.console.print(f"[cyan]🔧 {tool_name}[/cyan] {params_str}")
 
     def _print_tool_result(self, tool_name: str, result: Dict[str, Any], duration: float):
         """打印工具结果"""
-        if self.verbose:
-            success = result.get("success", False)
-            icon = "✅" if success else "❌"
-            color = "green" if success else "red"
+        if not self.verbose:
+            return
 
+        success = result.get("success", False)
+        icon = "✅" if success else "❌"
+        color = "green" if success else "red"
+
+        if self.detailed_mode:
+            # 详细模式：显示完整结果
             self.console.print(f"[{color}]{icon} {tool_name} 完成[/{color}] [dim]({duration:.2f}s)[/dim]")
 
-            # 打印关键结果
+            # 格式化并截断结果
+            result_str = json.dumps(result, ensure_ascii=False, indent=2)
+            if len(result_str) > self.detail_max_chars:
+                result_str = result_str[:self.detail_max_chars] + f"\n... [dim](结果已截断，共 {len(result_str)} 字符)[/dim]"
+            self.console.print(Panel(result_str, title="工具返回结果", border_style="dim"))
+        else:
+            # 简洁模式：只显示关键信息
+            self.console.print(f"[{color}]{icon} {tool_name}[/{color}] [dim]({duration:.2f}s)[/dim]", end="")
+
+            # 打印关键结果摘要
             if tool_name == "port_scan" and success:
                 ports = result.get("open_ports", [])
-                if ports:
-                    self.console.print(f"  发现 {len(ports)} 个开放端口")
-                    for p in ports[:5]:
-                        self.console.print(f"    - {p['port']}/{p['protocol']} ({p.get('service', 'unknown')})")
-                    if len(ports) > 5:
-                        self.console.print(f"    ... 共 {len(ports)} 个端口")
-
+                self.console.print(f" - 发现 {len(ports)} 个开放端口")
             elif tool_name == "dir_bruteforce" and success:
                 paths = result.get("found_paths", [])
-                if paths:
-                    self.console.print(f"  发现 {len(paths)} 个路径")
-                    for p in paths[:5]:
-                        self.console.print(f"    - [{p['status_code']}] {p['path']}")
-
-            elif tool_name in ["sql_injection_test", "xss_test", "lfi_test", "command_injection_test"]:
+                self.console.print(f" - 发现 {len(paths)} 个路径")
+            elif tool_name in ["sql_injection_test", "xss_test", "lfi_test", "command_injection_test", "sqlmap_scan"]:
                 if result.get("vulnerable"):
-                    self.console.print(f"  [bold red]⚠️  发现漏洞![/bold red]")
-                    for v in result.get("vulnerabilities", [])[:3]:
-                        self.console.print(f"    - {v.get('type', 'unknown')}: {v.get('param', '-')}")
+                    self.console.print(f" - [bold red]发现漏洞![/bold red]")
+                else:
+                    self.console.print(f" - 未发现漏洞")
+            elif tool_name == "sqlmap_dump" and success:
+                dbs = result.get("databases", [])
+                tables = result.get("tables", [])
+                if dbs:
+                    self.console.print(f" - 获取 {len(dbs)} 个数据库")
+                elif tables:
+                    self.console.print(f" - 获取 {len(tables)} 个表")
+                else:
+                    self.console.print("")
+            else:
+                self.console.print("")
 
     async def run_task(
         self,
