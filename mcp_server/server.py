@@ -374,6 +374,116 @@ class MCPToolServer:
             category="exploit"
         )
 
+        # ==================== SQLMap 工具 ====================
+        self._register_tool(
+            name="sqlmap_scan",
+            description="使用 sqlmap 自动化检测 SQL 注入漏洞。比手工测试更全面高效，支持多种注入技术。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "目标 URL，需包含参数 (如 http://target.com/page.php?id=1)"
+                    },
+                    "data": {
+                        "type": "string",
+                        "description": "POST 数据 (如 'username=admin&password=test')"
+                    },
+                    "param": {
+                        "type": "string",
+                        "description": "指定测试的参数名"
+                    },
+                    "level": {
+                        "type": "integer",
+                        "description": "测试等级 1-5，越高越全面但越慢",
+                        "default": 1
+                    },
+                    "risk": {
+                        "type": "integer",
+                        "description": "风险等级 1-3，越高测试越激进",
+                        "default": 1
+                    },
+                    "technique": {
+                        "type": "string",
+                        "description": "注入技术: B=布尔盲注, E=报错, U=联合, S=堆叠, T=时间盲注"
+                    },
+                    "dbms": {
+                        "type": "string",
+                        "description": "指定数据库类型",
+                        "enum": ["mysql", "oracle", "mssql", "postgresql", "sqlite"]
+                    }
+                },
+                "required": ["url"]
+            },
+            handler=self.exploit_tools.sqlmap_scan,
+            category="exploit"
+        )
+
+        self._register_tool(
+            name="sqlmap_dump",
+            description="使用 sqlmap 导出数据库数据。可列出数据库、表、列，并导出数据。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "目标 URL (已确认存在 SQL 注入)"
+                    },
+                    "data": {
+                        "type": "string",
+                        "description": "POST 数据"
+                    },
+                    "database": {
+                        "type": "string",
+                        "description": "指定数据库名 (不指定则列出所有数据库)"
+                    },
+                    "table": {
+                        "type": "string",
+                        "description": "指定表名"
+                    },
+                    "columns": {
+                        "type": "string",
+                        "description": "指定列名，逗号分隔"
+                    },
+                    "dump_all": {
+                        "type": "boolean",
+                        "description": "导出所有数据",
+                        "default": False
+                    }
+                },
+                "required": ["url"]
+            },
+            handler=self.exploit_tools.sqlmap_dump,
+            category="exploit"
+        )
+
+        self._register_tool(
+            name="sqlmap_shell",
+            description="使用 sqlmap 获取 shell。可获取 SQL shell 或尝试获取系统 shell。",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "目标 URL (已确认存在 SQL 注入)"
+                    },
+                    "shell_type": {
+                        "type": "string",
+                        "description": "shell 类型",
+                        "enum": ["sql", "os"],
+                        "default": "sql"
+                    },
+                    "data": {
+                        "type": "string",
+                        "description": "POST 数据"
+                    }
+                },
+                "required": ["url"]
+            },
+            handler=self.exploit_tools.sqlmap_shell,
+            category="exploit"
+        )
+
         # ==================== 辅助工具 ====================
         self._register_tool(
             name="dns_lookup",
