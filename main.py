@@ -46,6 +46,7 @@ HELP_TEXT = """
   report            - 生成当前任务报告
   status            - 查看当前任务状态
   tools             - 列出所有可用工具
+  clear             - 清空对话历史
   help              - 显示帮助信息
   exit/quit         - 退出程序
 
@@ -230,6 +231,10 @@ async def main_loop(orchestrator: Orchestrator):
 
             elif command == 'report':
                 generate_report(orchestrator, args if args else None)
+
+            elif command == 'clear':
+                orchestrator.clear_chat_history()
+                console.print("[green]对话历史已清空[/green]")
 
             else:
                 # 尝试作为自然语言指令处理

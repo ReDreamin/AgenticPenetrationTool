@@ -67,6 +67,9 @@ class Orchestrator:
         self.tool_server = MCPToolServer()
         self.task_manager = TaskManager()
 
+        # 对话历史 (用于 chat 模式的上下文记忆)
+        self.chat_history: List[Dict[str, Any]] = []
+
         # 回调函数
         self.on_tool_call: Optional[Callable] = None
         self.on_tool_result: Optional[Callable] = None
@@ -280,7 +283,7 @@ class Orchestrator:
 
     async def chat(self, message: str) -> str:
         """
-        交互式对话
+        交互式对话（保持上下文记忆）
 
         Args:
             message: 用户消息
@@ -290,16 +293,15 @@ class Orchestrator:
         """
         task = self.task_manager.get_current_task()
 
-        if task:
-            # 在现有任务上下文中对话
+        # 如果有任务上下文且是第一条消息，注入上下文
+        if task and len(self.chat_history) == 0:
             context = self.task_manager.get_task_context(task.task_id)
-            full_message = f"{context}\n\n用户: {message}"
+            context_message = f"[当前任务上下文]\n{context}\n\n[用户消息]\n{message}"
+            self.chat_history.append({"role": "user", "content": context_message})
         else:
-            full_message = message
+            self.chat_history.append({"role": "user", "content": message})
 
-        messages = [{"role": "user", "content": full_message}]
-
-        response = await self._call_claude(messages)
+        response = await self._call_claude(self.chat_history)
 
         if response:
             # 处理工具调用
@@ -309,8 +311,8 @@ class Orchestrator:
                 if not tool_calls:
                     break
 
-                # 添加助手消息
-                messages.append({"role": "assistant", "content": response.content})
+                # 添加助手消息到历史
+                self.chat_history.append({"role": "assistant", "content": response.content})
 
                 # 执行工具
                 tool_results = []
@@ -341,19 +343,27 @@ class Orchestrator:
                         "content": json.dumps(result, ensure_ascii=False)
                     })
 
-                messages.append({"role": "user", "content": tool_results})
+                # 添加工具结果到历史
+                self.chat_history.append({"role": "user", "content": tool_results})
 
                 # 继续对话
-                response = await self._call_claude(messages)
+                response = await self._call_claude(self.chat_history)
                 if not response:
                     return "API 调用失败"
 
-            # 提取最终文本
+            # 提取最终文本并保存到历史
             text_blocks = [block for block in response.content if block.type == "text"]
             if text_blocks:
-                return text_blocks[0].text
+                reply = text_blocks[0].text
+                self.chat_history.append({"role": "assistant", "content": reply})
+                return reply
 
         return "无法获取响应"
+
+    def clear_chat_history(self):
+        """清空对话历史"""
+        self.chat_history = []
+        self._print("[dim]对话历史已清空[/dim]")
 
     def get_task_summary(self) -> Optional[Dict[str, Any]]:
         """获取当前任务摘要"""
