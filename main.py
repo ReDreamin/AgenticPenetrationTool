@@ -47,18 +47,16 @@ HELP_TEXT = """
   status            - 查看当前任务状态
   tools             - 列出所有可用工具
   mode              - 切换详细/简洁模式
+  save [name]       - 保存当前对话
+  resume            - 恢复已保存的对话
   clear             - 清空对话历史
   help              - 显示帮助信息
   exit/quit         - 退出程序
 
-输出模式:
-  简洁模式(默认)    - 仅显示工具调用摘要
-  详细模式          - 显示完整的工具返回结果
-
 示例:
   scan 192.168.1.100
-  scan http://target.com
-  recon example.com
+  save dvwa_test
+  resume
 """
 
 
@@ -244,6 +242,60 @@ async def main_loop(orchestrator: Orchestrator):
             elif command == 'mode':
                 # 切换输出模式
                 orchestrator.set_detailed_mode(not orchestrator.detailed_mode)
+
+            elif command == 'save':
+                # 保存当前对话
+                name = args.strip() if args else None
+                orchestrator.save_session(name)
+
+            elif command == 'resume':
+                # 恢复已保存的对话
+                sessions = orchestrator.list_sessions()
+                if not sessions:
+                    console.print("[yellow]没有已保存的对话[/yellow]")
+                    continue
+
+                # 显示会话列表
+                console.print("\n[bold]已保存的对话:[/bold]")
+                table = Table(show_header=True)
+                table.add_column("#", style="cyan", width=4)
+                table.add_column("文件名", style="green")
+                table.add_column("保存时间", style="dim")
+                table.add_column("消息数", justify="right")
+                table.add_column("目标", style="yellow")
+
+                for i, session in enumerate(sessions, 1):
+                    target = session.get("task", {}).get("target", "-") if session.get("task") else "-"
+                    saved_at = session.get("saved_at", "未知")
+                    if saved_at != "未知":
+                        # 简化时间显示
+                        try:
+                            saved_at = saved_at.split("T")[0] + " " + saved_at.split("T")[1][:8]
+                        except Exception:
+                            pass
+                    table.add_row(
+                        str(i),
+                        session.get("filename", ""),
+                        saved_at,
+                        str(session.get("message_count", 0)),
+                        target
+                    )
+
+                console.print(table)
+
+                # 让用户选择
+                choice = Prompt.ask("\n选择要恢复的对话编号 (输入 0 取消)")
+                try:
+                    idx = int(choice)
+                    if idx == 0:
+                        console.print("[dim]已取消[/dim]")
+                    elif 1 <= idx <= len(sessions):
+                        filepath = sessions[idx - 1]["filepath"]
+                        orchestrator.load_session(filepath)
+                    else:
+                        console.print("[red]无效的编号[/red]")
+                except ValueError:
+                    console.print("[red]请输入数字[/red]")
 
             else:
                 # 尝试作为自然语言指令处理

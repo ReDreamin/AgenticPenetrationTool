@@ -44,6 +44,9 @@ env/
 *.log
 logs/
 
+# Sessions (saved conversations)
+sessions/
+
 # Reports (optional, uncomment if you want to ignore)
 # report_*.md
 

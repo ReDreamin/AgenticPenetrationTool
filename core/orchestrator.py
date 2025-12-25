@@ -4,6 +4,9 @@ LLM 编排器 - 核心调度层，负责与 Claude API 交互并调度工具
 import asyncio
 import json
 import time
+import os
+from datetime import datetime
+from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 import httpx
 from anthropic import Anthropic, APIConnectionError, AuthenticationError, APIStatusError
@@ -73,6 +76,10 @@ class Orchestrator:
         # 输出模式: True=详细模式, False=简洁模式
         self.detailed_mode: bool = False
         self.detail_max_chars: int = 1000  # 详细模式下结果最大显示字符数
+
+        # 对话保存目录
+        self.sessions_dir = Path("sessions")
+        self.sessions_dir.mkdir(exist_ok=True)
 
         # 回调函数
         self.on_tool_call: Optional[Callable] = None
@@ -398,6 +405,164 @@ class Orchestrator:
         """清空对话历史"""
         self.chat_history = []
         self._print("[dim]对话历史已清空[/dim]")
+
+    def save_session(self, name: Optional[str] = None) -> str:
+        """
+        保存当前对话会话
+
+        Args:
+            name: 会话名称（可选，默认使用时间戳）
+
+        Returns:
+            保存的文件路径
+        """
+        if not self.chat_history:
+            self._print("[yellow]当前没有对话历史可保存[/yellow]")
+            return ""
+
+        # 生成文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if name:
+            filename = f"{name}_{timestamp}.json"
+        else:
+            filename = f"session_{timestamp}.json"
+
+        filepath = self.sessions_dir / filename
+
+        # 获取当前任务信息
+        task = self.task_manager.get_current_task()
+        task_info = None
+        if task:
+            task_info = {
+                "task_id": task.task_id,
+                "target": task.target,
+                "task_type": task.task_type,
+                "phase": task.phase.value,
+                "vulnerabilities_count": len(task.vulnerabilities)
+            }
+
+        # 构建保存数据
+        session_data = {
+            "version": "1.0",
+            "saved_at": datetime.now().isoformat(),
+            "model": self.model,
+            "task": task_info,
+            "chat_history": self._serialize_chat_history(),
+            "message_count": len(self.chat_history)
+        }
+
+        # 保存到文件
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(session_data, f, ensure_ascii=False, indent=2)
+
+        self._print(f"[green]对话已保存到: {filepath}[/green]")
+        return str(filepath)
+
+    def _serialize_chat_history(self) -> List[Dict[str, Any]]:
+        """序列化对话历史（处理不可序列化的对象）"""
+        serialized = []
+        for msg in self.chat_history:
+            if isinstance(msg.get("content"), str):
+                serialized.append(msg)
+            elif isinstance(msg.get("content"), list):
+                # 处理工具调用结果
+                serialized.append({
+                    "role": msg["role"],
+                    "content": msg["content"]
+                })
+            else:
+                # 处理其他复杂类型
+                try:
+                    content = msg.get("content")
+                    if hasattr(content, '__iter__'):
+                        # 尝试提取文本内容
+                        text_parts = []
+                        for block in content:
+                            if hasattr(block, 'text'):
+                                text_parts.append(block.text)
+                            elif hasattr(block, 'type') and block.type == 'text':
+                                text_parts.append(block.text)
+                        serialized.append({
+                            "role": msg["role"],
+                            "content": "\n".join(text_parts) if text_parts else str(content)
+                        })
+                    else:
+                        serialized.append({
+                            "role": msg["role"],
+                            "content": str(content)
+                        })
+                except Exception:
+                    serialized.append({
+                        "role": msg["role"],
+                        "content": "[无法序列化的内容]"
+                    })
+        return serialized
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """
+        列出所有已保存的会话
+
+        Returns:
+            会话列表
+        """
+        sessions = []
+        for filepath in sorted(self.sessions_dir.glob("*.json"), reverse=True):
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                sessions.append({
+                    "filename": filepath.name,
+                    "filepath": str(filepath),
+                    "saved_at": data.get("saved_at", "未知"),
+                    "message_count": data.get("message_count", 0),
+                    "task": data.get("task"),
+                })
+            except Exception as e:
+                sessions.append({
+                    "filename": filepath.name,
+                    "filepath": str(filepath),
+                    "error": str(e)
+                })
+
+        return sessions
+
+    def load_session(self, filepath: str) -> bool:
+        """
+        加载已保存的会话
+
+        Args:
+            filepath: 会话文件路径
+
+        Returns:
+            是否成功加载
+        """
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # 恢复对话历史
+            self.chat_history = data.get("chat_history", [])
+
+            # 显示加载信息
+            self._print(f"[green]已加载会话: {filepath}[/green]")
+            self._print(f"[dim]保存时间: {data.get('saved_at', '未知')}[/dim]")
+            self._print(f"[dim]消息数量: {len(self.chat_history)}[/dim]")
+
+            task_info = data.get("task")
+            if task_info:
+                self._print(f"[dim]目标: {task_info.get('target', '未知')}[/dim]")
+
+            return True
+        except FileNotFoundError:
+            self._print(f"[red]文件不存在: {filepath}[/red]")
+            return False
+        except json.JSONDecodeError:
+            self._print(f"[red]文件格式错误: {filepath}[/red]")
+            return False
+        except Exception as e:
+            self._print(f"[red]加载失败: {str(e)}[/red]")
+            return False
 
     def get_task_summary(self) -> Optional[Dict[str, Any]]:
         """获取当前任务摘要"""
