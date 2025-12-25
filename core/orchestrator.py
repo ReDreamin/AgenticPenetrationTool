@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 import httpx
-from anthropic import Anthropic, APIConnectionError, AuthenticationError, APIStatusError
+from anthropic import AsyncAnthropic, APIConnectionError, AuthenticationError, APIStatusError
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -42,19 +42,19 @@ class Orchestrator:
         # 配置代理
         proxy_url = proxy or config.HTTPS_PROXY or config.HTTP_PROXY
 
-        # 创建带代理的 HTTP 客户端
+        # 创建带代理的异步 HTTP 客户端
         if proxy_url:
             self._print(f"[dim]使用代理: {proxy_url}[/dim]")
-            http_client = httpx.Client(
+            http_client = httpx.AsyncClient(
                 proxy=proxy_url,
                 timeout=httpx.Timeout(config.REQUEST_TIMEOUT, connect=10.0)
             )
         else:
-            http_client = httpx.Client(
+            http_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(config.REQUEST_TIMEOUT, connect=10.0)
             )
 
-        # 创建 Anthropic 客户端
+        # 创建异步 Anthropic 客户端
         client_kwargs = {
             "api_key": self.api_key,
             "http_client": http_client,
@@ -66,7 +66,7 @@ class Orchestrator:
             client_kwargs["base_url"] = config.ANTHROPIC_BASE_URL
             self._print(f"[dim]使用自定义 API 端点: {config.ANTHROPIC_BASE_URL}[/dim]")
 
-        self.client = Anthropic(**client_kwargs)
+        self.client = AsyncAnthropic(**client_kwargs)
         self.tool_server = MCPToolServer()
         self.task_manager = TaskManager()
 
@@ -292,9 +292,9 @@ class Orchestrator:
         return self.task_manager.export_task(task.task_id)
 
     async def _call_claude(self, messages: List[Dict[str, Any]]) -> Any:
-        """调用 Claude API"""
+        """调用 Claude API (异步)"""
         try:
-            response = self.client.messages.create(
+            response = await self.client.messages.create(
                 model=self.model,
                 max_tokens=4096,
                 system=SYSTEM_PROMPT,

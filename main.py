@@ -87,16 +87,21 @@ async def interactive_chat(orchestrator: Orchestrator):
                 continue
 
             console.print()
-            with console.status("[bold blue]AI 思考中...[/bold blue]"):
+            console.print("[dim]AI 思考中...[/dim]")
+            try:
                 response = await orchestrator.chat(user_input)
-
-            console.print(Panel(
-                Markdown(response),
-                title="[bold blue]AI[/bold blue]",
-                border_style="blue"
-            ))
+                console.print(Panel(
+                    Markdown(response),
+                    title="[bold blue]AI[/bold blue]",
+                    border_style="blue"
+                ))
+            except asyncio.CancelledError:
+                console.print("\n[yellow]请求已取消[/yellow]")
 
         except KeyboardInterrupt:
+            console.print("\n[cyan]退出对话模式[/cyan]")
+            break
+        except asyncio.CancelledError:
             console.print("\n[cyan]退出对话模式[/cyan]")
             break
 
@@ -299,17 +304,22 @@ async def main_loop(orchestrator: Orchestrator):
 
             else:
                 # 尝试作为自然语言指令处理
-                console.print(f"\n[dim]将 '{user_input}' 作为自然语言指令处理...[/dim]\n")
-                with console.status("[bold blue]AI 处理中...[/bold blue]"):
+                console.print(f"\n[dim]将 '{user_input}' 作为自然语言指令处理...[/dim]")
+                console.print("[dim]AI 处理中...[/dim]")
+                try:
                     response = await orchestrator.chat(user_input)
-                console.print(Panel(
-                    Markdown(response),
-                    title="[bold blue]AI[/bold blue]",
-                    border_style="blue"
-                ))
+                    console.print(Panel(
+                        Markdown(response),
+                        title="[bold blue]AI[/bold blue]",
+                        border_style="blue"
+                    ))
+                except asyncio.CancelledError:
+                    console.print("\n[yellow]请求已取消[/yellow]")
 
         except KeyboardInterrupt:
             console.print("\n[yellow]使用 'exit' 命令退出程序[/yellow]")
+        except asyncio.CancelledError:
+            console.print("\n[yellow]操作已取消[/yellow]")
         except Exception as e:
             console.print(f"[red]错误: {str(e)}[/red]")
 
