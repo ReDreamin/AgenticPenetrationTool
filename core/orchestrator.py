@@ -462,41 +462,60 @@ class Orchestrator:
         """序列化对话历史（处理不可序列化的对象）"""
         serialized = []
         for msg in self.chat_history:
-            if isinstance(msg.get("content"), str):
-                serialized.append(msg)
-            elif isinstance(msg.get("content"), list):
-                # 处理工具调用结果
-                serialized.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
-                })
+            content = msg.get("content")
+            role = msg.get("role", "user")
+
+            if isinstance(content, str):
+                serialized.append({"role": role, "content": content})
+            elif isinstance(content, list):
+                # 处理列表类型的 content (可能包含 TextBlock, ToolUse 等对象)
+                serialized_content = []
+                for item in content:
+                    serialized_content.append(self._serialize_content_block(item))
+                serialized.append({"role": role, "content": serialized_content})
             else:
-                # 处理其他复杂类型
-                try:
-                    content = msg.get("content")
-                    if hasattr(content, '__iter__'):
-                        # 尝试提取文本内容
-                        text_parts = []
-                        for block in content:
-                            if hasattr(block, 'text'):
-                                text_parts.append(block.text)
-                            elif hasattr(block, 'type') and block.type == 'text':
-                                text_parts.append(block.text)
-                        serialized.append({
-                            "role": msg["role"],
-                            "content": "\n".join(text_parts) if text_parts else str(content)
-                        })
-                    else:
-                        serialized.append({
-                            "role": msg["role"],
-                            "content": str(content)
-                        })
-                except Exception:
-                    serialized.append({
-                        "role": msg["role"],
-                        "content": "[无法序列化的内容]"
-                    })
+                # 处理单个对象（如 TextBlock）
+                serialized.append({
+                    "role": role,
+                    "content": self._serialize_content_block(content)
+                })
         return serialized
+
+    def _serialize_content_block(self, block: Any) -> Any:
+        """序列化单个内容块"""
+        # 如果已经是基础类型，直接返回
+        if isinstance(block, (str, int, float, bool, type(None))):
+            return block
+
+        # 如果是字典，递归处理
+        if isinstance(block, dict):
+            return {k: self._serialize_content_block(v) for k, v in block.items()}
+
+        # 如果是列表，递归处理
+        if isinstance(block, list):
+            return [self._serialize_content_block(item) for item in block]
+
+        # 处理 Anthropic 的 TextBlock 对象
+        if hasattr(block, 'type') and hasattr(block, 'text') and block.type == 'text':
+            return {"type": "text", "text": block.text}
+
+        # 处理 Anthropic 的 ToolUseBlock 对象
+        if hasattr(block, 'type') and block.type == 'tool_use':
+            return {
+                "type": "tool_use",
+                "id": getattr(block, 'id', ''),
+                "name": getattr(block, 'name', ''),
+                "input": getattr(block, 'input', {})
+            }
+
+        # 尝试转换为字典（如果对象有 model_dump 或 dict 方法）
+        if hasattr(block, 'model_dump'):
+            return block.model_dump()
+        if hasattr(block, 'dict'):
+            return block.dict()
+
+        # 最后手段：转为字符串
+        return str(block)
 
     def list_sessions(self) -> List[Dict[str, Any]]:
         """
