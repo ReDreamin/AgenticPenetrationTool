@@ -4,18 +4,25 @@ WuTong - 智能渗透测试工具配置文件
 import os
 from typing import Optional
 
-# Claude API 配置
-ANTHROPIC_API_KEY: Optional[str] = os.getenv("ANTHROPIC_API_KEY")
-CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
+# LLM 服务商配置
+# 支持的服务商: "anthropic", "openai"
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "anthropic")
 
-# 代理配置 (用于访问 Anthropic API)
+# Anthropic (Claude) API 配置
+ANTHROPIC_API_KEY: Optional[str] = os.getenv("ANTHROPIC_API_KEY")
+CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
+ANTHROPIC_BASE_URL: Optional[str] = os.getenv("ANTHROPIC_BASE_URL")
+
+# OpenAI API 配置
+OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
+OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_BASE_URL: Optional[str] = os.getenv("OPENAI_BASE_URL")
+
+# 代理配置 (用于访问 API)
 # 支持 HTTP/HTTPS/SOCKS5 代理
 # 示例: "http://127.0.0.1:7890" 或 "socks5://127.0.0.1:1080"
 HTTP_PROXY: Optional[str] = os.getenv("HTTP_PROXY") or os.getenv("http_proxy")
 HTTPS_PROXY: Optional[str] = os.getenv("HTTPS_PROXY") or os.getenv("https_proxy")
-
-# API 基础 URL (可选，用于自定义 API 端点)
-ANTHROPIC_BASE_URL: Optional[str] = os.getenv("ANTHROPIC_BASE_URL")
 
 # 请求配置
 REQUEST_TIMEOUT: int = 60  # 增加超时时间

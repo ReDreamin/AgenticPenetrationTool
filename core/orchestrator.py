@@ -1,5 +1,6 @@
 """
-LLM 编排器 - 核心调度层，负责与 Claude API 交互并调度工具
+LLM 编排器 - 核心调度层，负责与 LLM API 交互并调度工具
+支持多服务商: Anthropic (Claude), OpenAI
 """
 import asyncio
 import json
@@ -9,7 +10,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Callable
 import httpx
-from anthropic import AsyncAnthropic, APIConnectionError, AuthenticationError, APIStatusError
 from rich.console import Console
 from rich.panel import Panel
 from rich.markdown import Markdown
@@ -18,6 +18,18 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 import config
 from mcp_server.server import MCPToolServer
 from .task_manager import TaskManager, TaskPhase
+from .llm_client import (
+    create_llm_client,
+    BaseLLMClient,
+    ToolCall,
+    TextBlock,
+    LLMResponse,
+    LLMError,
+    LLMAuthError,
+    LLMConnectionError,
+    LLMAPIError,
+    LLMTimeoutError
+)
 from prompts.system_prompt import SYSTEM_PROMPT, get_task_prompt
 
 
@@ -29,44 +41,59 @@ class Orchestrator:
         api_key: Optional[str] = None,
         model: Optional[str] = None,
         verbose: bool = True,
-        proxy: Optional[str] = None
+        proxy: Optional[str] = None,
+        provider: Optional[str] = None,
+        base_url: Optional[str] = None
     ):
-        self.api_key = api_key or config.ANTHROPIC_API_KEY
-        self.model = model or config.CLAUDE_MODEL
         self.verbose = verbose
         self.console = Console()
 
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY not set. Please set the environment variable or pass api_key parameter.")
+        # 确定服务商
+        self.provider = (provider or config.LLM_PROVIDER).lower()
+
+        # 根据服务商获取 API Key 和模型
+        if self.provider == "anthropic":
+            self.api_key = api_key or config.ANTHROPIC_API_KEY
+            self.model = model or config.CLAUDE_MODEL
+            self.base_url = base_url or config.ANTHROPIC_BASE_URL
+            if not self.api_key:
+                raise ValueError(
+                    "ANTHROPIC_API_KEY not set. "
+                    "Please set the environment variable or pass api_key parameter."
+                )
+        elif self.provider == "openai":
+            self.api_key = api_key or config.OPENAI_API_KEY
+            self.model = model or config.OPENAI_MODEL
+            self.base_url = base_url or config.OPENAI_BASE_URL
+            if not self.api_key:
+                raise ValueError(
+                    "OPENAI_API_KEY not set. "
+                    "Please set the environment variable or pass api_key parameter."
+                )
+        else:
+            raise ValueError(f"不支持的服务商: {self.provider}。支持的服务商: anthropic, openai")
 
         # 配置代理
         proxy_url = proxy or config.HTTPS_PROXY or config.HTTP_PROXY
-
-        # 创建带代理的异步 HTTP 客户端
         if proxy_url:
             self._print(f"[dim]使用代理: {proxy_url}[/dim]")
-            http_client = httpx.AsyncClient(
-                proxy=proxy_url,
-                timeout=httpx.Timeout(config.REQUEST_TIMEOUT, connect=10.0)
-            )
-        else:
-            http_client = httpx.AsyncClient(
-                timeout=httpx.Timeout(config.REQUEST_TIMEOUT, connect=10.0)
-            )
 
-        # 创建异步 Anthropic 客户端
-        client_kwargs = {
-            "api_key": self.api_key,
-            "http_client": http_client,
-            "max_retries": config.MAX_RETRIES
-        }
+        # 显示服务商信息
+        self._print(f"[dim]LLM 服务商: {self.provider.upper()} ({self.model})[/dim]")
+        if self.base_url:
+            self._print(f"[dim]使用自定义 API 端点: {self.base_url}[/dim]")
 
-        # 如果设置了自定义 base_url
-        if config.ANTHROPIC_BASE_URL:
-            client_kwargs["base_url"] = config.ANTHROPIC_BASE_URL
-            self._print(f"[dim]使用自定义 API 端点: {config.ANTHROPIC_BASE_URL}[/dim]")
+        # 创建 LLM 客户端
+        self.client: BaseLLMClient = create_llm_client(
+            provider=self.provider,
+            api_key=self.api_key,
+            model=self.model,
+            base_url=self.base_url,
+            proxy=proxy_url,
+            timeout=config.REQUEST_TIMEOUT,
+            max_retries=config.MAX_RETRIES
+        )
 
-        self.client = AsyncAnthropic(**client_kwargs)
         self.tool_server = MCPToolServer()
         self.task_manager = TaskManager()
 
@@ -206,23 +233,24 @@ class Orchestrator:
         try:
             # 主循环
             while True:
-                # 调用 Claude API
-                response = await self._call_claude(messages)
+                # 调用 LLM API
+                response = await self._call_llm(messages)
 
                 if not response:
-                    self._print("[red]Claude API 调用失败[/red]")
+                    self._print("[red]LLM API 调用失败[/red]")
                     break
 
-                # 处理响应
-                assistant_message = {"role": "assistant", "content": response.content}
+                # 处理响应 - 转换为可序列化格式
+                serialized_content = self._serialize_response_content(response.content)
+                assistant_message = {"role": "assistant", "content": serialized_content}
                 messages.append(assistant_message)
 
                 # 检查是否有工具调用
-                tool_calls = [block for block in response.content if block.type == "tool_use"]
+                tool_calls = [block for block in response.content if isinstance(block, ToolCall)]
 
                 if not tool_calls:
                     # 没有工具调用，提取文本响应
-                    text_blocks = [block for block in response.content if block.type == "text"]
+                    text_blocks = [block for block in response.content if isinstance(block, TextBlock)]
                     if text_blocks:
                         final_text = text_blocks[0].text
                         self._print_panel(
@@ -261,11 +289,10 @@ class Orchestrator:
                     )
 
                     # 准备工具结果
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_call.id,
-                        "content": json.dumps(result, ensure_ascii=False)
-                    })
+                    result_json = json.dumps(result, ensure_ascii=False)
+                    tool_results.append(
+                        self.client.format_tool_result(tool_call.id, result_json)
+                    )
 
                     # 回调
                     if self.on_tool_result:
@@ -291,32 +318,49 @@ class Orchestrator:
 
         return self.task_manager.export_task(task.task_id)
 
-    async def _call_claude(self, messages: List[Dict[str, Any]]) -> Any:
-        """调用 Claude API (异步)"""
+    def _serialize_response_content(self, content: List[Any]) -> List[Dict[str, Any]]:
+        """将响应内容序列化为可存储的格式"""
+        serialized = []
+        for block in content:
+            if isinstance(block, TextBlock):
+                serialized.append({"type": "text", "text": block.text})
+            elif isinstance(block, ToolCall):
+                serialized.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input
+                })
+            else:
+                serialized.append(block)
+        return serialized
+
+    async def _call_llm(self, messages: List[Dict[str, Any]]) -> Optional[LLMResponse]:
+        """调用 LLM API (异步)"""
         try:
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
+            response = await self.client.create_message(
+                messages=messages,
                 system=SYSTEM_PROMPT,
                 tools=self.tool_server.get_tools_for_claude(),
-                messages=messages
+                max_tokens=4096
             )
             return response
-        except AuthenticationError as e:
-            self._print(f"[red]API Key 认证失败: {str(e)}[/red]")
-            self._print("[yellow]请检查 ANTHROPIC_API_KEY 是否正确设置[/yellow]")
+        except LLMAuthError as e:
+            self._print(f"[red]{str(e)}[/red]")
+            key_name = "ANTHROPIC_API_KEY" if self.provider == "anthropic" else "OPENAI_API_KEY"
+            self._print(f"[yellow]请检查 {key_name} 是否正确设置[/yellow]")
             return None
-        except APIConnectionError as e:
-            self._print(f"[red]API 连接失败: {str(e)}[/red]")
+        except LLMConnectionError as e:
+            self._print(f"[red]{str(e)}[/red]")
             self._print("[yellow]请检查网络连接或代理设置[/yellow]")
             self._print("[dim]提示: 设置 HTTP_PROXY 或 HTTPS_PROXY 环境变量，或使用 --proxy 参数[/dim]")
             return None
-        except APIStatusError as e:
-            self._print(f"[red]API 状态错误 ({e.status_code}): {str(e)}[/red]")
-            return None
-        except httpx.TimeoutException as e:
-            self._print(f"[red]请求超时: {str(e)}[/red]")
+        except LLMTimeoutError as e:
+            self._print(f"[red]{str(e)}[/red]")
             self._print("[yellow]请检查网络连接或增加超时时间[/yellow]")
+            return None
+        except LLMAPIError as e:
+            self._print(f"[red]{str(e)}[/red]")
             return None
         except Exception as e:
             self._print(f"[red]API 调用错误: {str(e)}[/red]")
@@ -342,18 +386,19 @@ class Orchestrator:
         else:
             self.chat_history.append({"role": "user", "content": message})
 
-        response = await self._call_claude(self.chat_history)
+        response = await self._call_llm(self.chat_history)
 
         if response:
             # 处理工具调用
             while True:
-                tool_calls = [block for block in response.content if block.type == "tool_use"]
+                tool_calls = [block for block in response.content if isinstance(block, ToolCall)]
 
                 if not tool_calls:
                     break
 
-                # 添加助手消息到历史
-                self.chat_history.append({"role": "assistant", "content": response.content})
+                # 添加助手消息到历史（序列化后的格式）
+                serialized_content = self._serialize_response_content(response.content)
+                self.chat_history.append({"role": "assistant", "content": serialized_content})
 
                 # 执行工具
                 tool_results = []
@@ -378,22 +423,21 @@ class Orchestrator:
                             duration
                         )
 
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": tool_call.id,
-                        "content": json.dumps(result, ensure_ascii=False)
-                    })
+                    result_json = json.dumps(result, ensure_ascii=False)
+                    tool_results.append(
+                        self.client.format_tool_result(tool_call.id, result_json)
+                    )
 
                 # 添加工具结果到历史
                 self.chat_history.append({"role": "user", "content": tool_results})
 
                 # 继续对话
-                response = await self._call_claude(self.chat_history)
+                response = await self._call_llm(self.chat_history)
                 if not response:
                     return "API 调用失败"
 
             # 提取最终文本并保存到历史
-            text_blocks = [block for block in response.content if block.type == "text"]
+            text_blocks = [block for block in response.content if isinstance(block, TextBlock)]
             if text_blocks:
                 reply = text_blocks[0].text
                 self.chat_history.append({"role": "assistant", "content": reply})

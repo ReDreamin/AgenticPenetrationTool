@@ -33,8 +33,8 @@ BANNER = """
 ╚███╔███╔╝╚██████╔╝   ██║   ╚██████╔╝██║ ╚████║╚██████╔╝
  ╚══╝╚══╝  ╚═════╝    ╚═╝    ╚═════╝ ╚═╝  ╚═══╝ ╚═════╝
 
-    智能渗透测试工具 v0.1.0
-    Powered by Claude AI
+    智能渗透测试工具 v0.2.0
+    Powered by Claude/GPT AI
 """
 
 HELP_TEXT = """
@@ -324,9 +324,24 @@ async def main_loop(orchestrator: Orchestrator):
             console.print(f"[red]错误: {str(e)}[/red]")
 
 
-async def run_single_task(target: str, task_type: str, output: str = None, api_key: str = None, proxy: str = None):
+async def run_single_task(
+    target: str,
+    task_type: str,
+    output: str = None,
+    api_key: str = None,
+    proxy: str = None,
+    provider: str = None,
+    model: str = None,
+    base_url: str = None
+):
     """运行单个任务（非交互模式）"""
-    orchestrator = Orchestrator(api_key=api_key, proxy=proxy)
+    orchestrator = Orchestrator(
+        api_key=api_key,
+        proxy=proxy,
+        provider=provider,
+        model=model,
+        base_url=base_url
+    )
 
     console.print(BANNER, style="bold cyan")
 
@@ -345,10 +360,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-  python main.py                          # 交互模式
-  python main.py -t 192.168.1.100         # 扫描目标
-  python main.py -t target.com --recon    # 仅信息收集
-  python main.py -t target.com -o report.md  # 输出报告
+  python main.py                                    # 交互模式 (默认使用 Anthropic)
+  python main.py --provider openai                  # 使用 OpenAI
+  python main.py -t 192.168.1.100                   # 扫描目标
+  python main.py -t target.com --recon              # 仅信息收集
+  python main.py -t target.com -o report.md         # 输出报告
+  python main.py --provider openai --model gpt-4o   # 指定 OpenAI 模型
+
+环境变量:
+  LLM_PROVIDER          - 默认服务商 (anthropic/openai)
+  ANTHROPIC_API_KEY     - Anthropic API Key
+  OPENAI_API_KEY        - OpenAI API Key
+  ANTHROPIC_BASE_URL    - Anthropic 自定义端点
+  OPENAI_BASE_URL       - OpenAI 自定义端点
         """
     )
 
@@ -375,8 +399,20 @@ def main():
     )
 
     parser.add_argument(
+        '--provider', '-p',
+        choices=['anthropic', 'openai'],
+        default=None,
+        help='LLM 服务商 (anthropic 或 openai，默认从环境变量 LLM_PROVIDER 读取)'
+    )
+
+    parser.add_argument(
         '--api-key',
-        help='Anthropic API Key (或设置 ANTHROPIC_API_KEY 环境变量)'
+        help='API Key (根据服务商自动选择对应的 Key)'
+    )
+
+    parser.add_argument(
+        '--model', '-m',
+        help='模型名称 (如 claude-sonnet-4-20250514, gpt-4o)'
     )
 
     parser.add_argument(
@@ -405,31 +441,38 @@ def main():
     else:
         task_type = "full"
 
-    # 如果指定了 base_url，设置到 config
-    if args.base_url:
-        import config as cfg
-        cfg.ANTHROPIC_BASE_URL = args.base_url
-
     try:
         if args.target:
             # 非交互模式：直接执行任务
             asyncio.run(run_single_task(
-                args.target,
-                task_type,
-                args.output,
-                args.api_key,
-                args.proxy
+                target=args.target,
+                task_type=task_type,
+                output=args.output,
+                api_key=args.api_key,
+                proxy=args.proxy,
+                provider=args.provider,
+                model=args.model,
+                base_url=args.base_url
             ))
         else:
             # 交互模式
-            orchestrator = Orchestrator(api_key=args.api_key, verbose=not args.quiet, proxy=args.proxy)
+            orchestrator = Orchestrator(
+                api_key=args.api_key,
+                verbose=not args.quiet,
+                proxy=args.proxy,
+                provider=args.provider,
+                model=args.model,
+                base_url=args.base_url
+            )
             asyncio.run(main_loop(orchestrator))
 
     except KeyboardInterrupt:
         console.print("\n[cyan]程序已退出[/cyan]")
     except ValueError as e:
         console.print(f"[red]配置错误: {str(e)}[/red]")
-        console.print("[yellow]请设置 ANTHROPIC_API_KEY 环境变量或使用 --api-key 参数[/yellow]")
+        console.print("[yellow]请设置对应服务商的 API Key 环境变量或使用 --api-key 参数[/yellow]")
+        console.print("[dim]  Anthropic: ANTHROPIC_API_KEY[/dim]")
+        console.print("[dim]  OpenAI:    OPENAI_API_KEY[/dim]")
         sys.exit(1)
     except Exception as e:
         console.print(f"[red]程序错误: {str(e)}[/red]")
