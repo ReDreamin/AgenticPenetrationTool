@@ -250,16 +250,28 @@ class OpenAIClient(BaseLLMClient):
                     # 处理工具结果列表
                     for item in content:
                         if isinstance(item, dict):
-                            if item.get("type") == "tool_result":
+                            # OpenAI 格式的工具结果 (role: "tool")
+                            if item.get("role") == "tool":
+                                openai_messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": item.get("tool_call_id", ""),
+                                    "content": item.get("content", "")
+                                })
+                            # Anthropic 格式的工具结果 (type: "tool_result")
+                            elif item.get("type") == "tool_result":
                                 openai_messages.append({
                                     "role": "tool",
                                     "tool_call_id": item.get("tool_use_id", ""),
                                     "content": item.get("content", "")
                                 })
+                            # 文本内容
+                            elif item.get("type") == "text":
+                                openai_messages.append({"role": "user", "content": item.get("text", "")})
                             else:
-                                # 其他类型的内容
-                                text = item.get("text", str(item))
-                                openai_messages.append({"role": "user", "content": text})
+                                # 其他类型的内容，尝试提取文本
+                                text = item.get("text") or item.get("content")
+                                if text:
+                                    openai_messages.append({"role": "user", "content": str(text)})
 
             elif role == "assistant":
                 if isinstance(content, str):
@@ -305,6 +317,14 @@ class OpenAIClient(BaseLLMClient):
                             assistant_msg["content"] = None
 
                     openai_messages.append(assistant_msg)
+
+            # 直接处理 tool 角色的消息（来自之前转换的结果）
+            elif role == "tool":
+                openai_messages.append({
+                    "role": "tool",
+                    "tool_call_id": msg.get("tool_call_id", ""),
+                    "content": content if isinstance(content, str) else str(content)
+                })
 
         return openai_messages
 
