@@ -328,6 +328,12 @@ class OpenAIClient(BaseLLMClient):
 
         return openai_messages
 
+    def _is_new_model(self) -> bool:
+        """检查是否是使用 max_completion_tokens 的新模型"""
+        new_model_prefixes = ("o1", "o3", "gpt-5", "gpt-4.5")
+        model_lower = self.model.lower()
+        return any(model_lower.startswith(prefix) for prefix in new_model_prefixes)
+
     async def create_message(
         self,
         messages: List[Dict[str, Any]],
@@ -345,14 +351,25 @@ class OpenAIClient(BaseLLMClient):
             # 转换工具格式
             openai_tools = self.convert_tools_format(tools)
 
+            # 构建请求参数
+            request_params = {
+                "model": self.model,
+                "messages": openai_messages,
+            }
+
+            # 新模型使用 max_completion_tokens，旧模型使用 max_tokens
+            if self._is_new_model():
+                request_params["max_completion_tokens"] = max_tokens
+            else:
+                request_params["max_tokens"] = max_tokens
+
+            # 添加工具配置
+            if openai_tools:
+                request_params["tools"] = openai_tools
+                request_params["tool_choice"] = "auto"
+
             # 调用 API
-            response = await self.client.chat.completions.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                messages=openai_messages,
-                tools=openai_tools if openai_tools else None,
-                tool_choice="auto" if openai_tools else None
-            )
+            response = await self.client.chat.completions.create(**request_params)
 
             # 转换为统一格式
             content = []
