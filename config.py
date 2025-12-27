@@ -6,7 +6,7 @@ from typing import Optional
 
 # LLM 服务商配置
 # 支持的服务商: "anthropic", "openai"
-LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "anthropic")
+LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")
 
 # Anthropic (Claude) API 配置
 ANTHROPIC_API_KEY: Optional[str] = os.getenv("ANTHROPIC_API_KEY")
@@ -15,7 +15,7 @@ ANTHROPIC_BASE_URL: Optional[str] = os.getenv("ANTHROPIC_BASE_URL")
 
 # OpenAI API 配置
 OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
-OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-5.2")
 OPENAI_BASE_URL: Optional[str] = os.getenv("OPENAI_BASE_URL")
 
 # 代理配置 (用于访问 API)
