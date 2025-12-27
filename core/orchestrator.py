@@ -79,7 +79,7 @@ class Orchestrator:
             self._print(f"[dim]使用代理: {proxy_url}[/dim]")
 
         # 显示服务商信息
-        self._print(f"[dim]LLM 服务商: {self.provider.upper()} ({self.model})[/dim]")
+        #self._print(f"[dim]LLM 服务商: {self.provider.upper()} ({self.model})[/dim]")
         if self.base_url:
             self._print(f"[dim]使用自定义 API 端点: {self.base_url}[/dim]")
 
